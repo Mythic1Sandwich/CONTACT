@@ -1,52 +1,69 @@
-#include "server.h"
-#include "parser.h"
-#include "client.h"
+#include "Server.h"
+#include "functions.h"
 #include <QDebug>
-#include <QCoreApplication>
 
-Server::Server(QObject *parent) : QObject(parent){
-    mTcpServer = new QTcpServer(this);
-    connect(mTcpServer, &QTcpServer::newConnection,
-            this, &Server::slotNewConnection);
-
-    if(!mTcpServer->listen(QHostAddress::Any, 33333)){
-        qDebug() << "server is not started";
-    } else {
-        server_status=1;
-        qDebug() << "server is started";
-    }
-}
-
-// функция подключения нового клиента
-void Server::slotNewConnection(){
-    if(server_status==1){
-        QTcpSocket * soket = mTcpServer->nextPendingConnection();
-        qDebug() << "new client connected: " << soket->peerAddress();
-        client *clnt = new client(this, soket);
-        connect(clnt, &client::send, this, &Server::slotMessage);
-        connect(clnt, &client::close, this, &Server::slotRemove);
-        clients << clnt;
-        clnt->Socket->write("Welcome to the server!\r\n");
-    }
-}
-// спам-рассылка всем подключённым пользователям
-void Server::slotMessage(QString line){
-    qDebug() << "Sending line: " << line;
-    foreach(client * clnt, clients){
-        clnt->Socket->write((line + "\r\n").toUtf8());
-    }
-}
-
-// отключение пользователя
-void Server::slotRemove(client* clnt){
-    clnt->Socket->close();
-    clients.remove(clients.indexOf(clnt));
-    qDebug() << "-1 client :(";
-}
-
-Server::~Server(){
-    foreach(client* clnt, clients){
-        clnt->Socket->close();
-    }
+Server::~Server()
+{
+    TCPServer->close();
     server_status = 0;
+}
+
+Server::Server(QObject *parent) : QObject(parent)
+{
+    TCPServer = new QTcpServer(this);
+    connect(TCPServer, &QTcpServer::newConnection,
+            this, &Server::NewConnection);
+
+    if(!TCPServer->listen(QHostAddress::Any, 33333))
+    {
+        qDebug() << "Error. Server is not started";
+    } else {
+        server_status = 1;
+        qDebug() << "Server is started";
+    }
+}
+
+void Server::NewConnection()
+{
+    if(server_status == 1)
+    {
+        qDebug() << "New client connected";
+        QTcpSocket *Current_TCPSocket;
+        Current_TCPSocket = TCPServer->nextPendingConnection();
+
+        long long id = Current_TCPSocket->socketDescriptor();
+        Current_TCPSocket->write("Your ID: ");
+        Current_TCPSocket->write(QString::number(id).toUtf8());
+        Current_TCPSocket->write("\r\n");
+        Clients.insert(Current_TCPSocket,id);
+        connect(Current_TCPSocket, &QTcpSocket::readyRead,
+                this,&Server::ServerDataRead);
+        connect(Current_TCPSocket,&QTcpSocket::disconnected,
+                this,&Server::ClientDisconnected);
+    }
+}
+
+
+void Server::ServerDataRead()
+{
+    QTcpSocket *Current_TCPSocket = (QTcpSocket*)sender();
+    QByteArray data_output;
+    QString data_input;
+    while(Current_TCPSocket->bytesAvailable()>0)
+    {
+        data_input += Current_TCPSocket->readAll();
+    }
+    QString id = QString::number(Current_TCPSocket->socketDescriptor());
+    data_output = parsing(data_input, id).toUtf8();
+    Current_TCPSocket->write(data_output);
+}
+
+void Server::ClientDisconnected()
+{
+    QTcpSocket *Current_TCPSocket = (QTcpSocket*)sender();
+    qDebug() << "Client disconnected";
+    QString id = QString::number(Clients.value(Current_TCPSocket));
+    close_session(id);
+    Clients.remove(Current_TCPSocket);
+    Current_TCPSocket->close();
 }
